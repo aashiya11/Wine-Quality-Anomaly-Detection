@@ -28,11 +28,11 @@ def process_wine_type(df, wine_type, pdf):
     df_results["wine_name"] = wine_names
     df_results["true_anomaly"] = y_true
 
-    # --- Z-Score ---
+    # Z-Score 
     z_scores = np.abs((X_scaled - X_scaled.mean(axis=0)) / X_scaled.std(axis=0))
     df_results["anomaly_zscore"] = (z_scores > 3).any(axis=1).astype(int)
 
-    # --- Linear Regression ---
+    # Linear Regression 
     X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
     lr_model = LinearRegression()
     lr_model.fit(X_train, y_train)
@@ -42,21 +42,21 @@ def process_wine_type(df, wine_type, pdf):
     df_results["linreg_error"] = lr_error
     df_results["anomaly_linreg"] = (lr_error > lr_threshold).astype(int)
 
-    # --- LOF ---
+    # LOF 
     lof = LocalOutlierFactor(n_neighbors=20, contamination=0.05)
     lof_pred = lof.fit_predict(X_scaled)
     df_results["anomaly_lof"] = np.where(lof_pred == -1, 1, 0)
 
-    # --- Total Flags ---
+    # Total Flags
     df_results["total_flags"] = df_results[["anomaly_zscore", "anomaly_linreg", "anomaly_lof"]].sum(axis=1)
 
-    # --- Evaluation Metrics (LOF) ---
+    # Evaluation Metrics
     precision = precision_score(df_results["true_anomaly"], df_results["anomaly_lof"])
     recall = recall_score(df_results["true_anomaly"], df_results["anomaly_lof"])
     f1 = f1_score(df_results["true_anomaly"], df_results["anomaly_lof"])
     roc_auc = roc_auc_score(df_results["true_anomaly"], df_results["anomaly_lof"])
 
-    # --- Plot 1: % Anomalies ---
+    # % Anomalies
     methods = ["Z-Score", "Linear Regression", "Local Outlier Factor"]
     flags = [df_results["anomaly_zscore"], df_results["anomaly_linreg"], df_results["anomaly_lof"]]
     percentages = [(flag.sum() / len(df_results)) * 100 for flag in flags]
@@ -69,7 +69,7 @@ def process_wine_type(df, wine_type, pdf):
     pdf.savefig()
     plt.close()
 
-    # --- Plot 2: Flag Count ---
+    # Flag Count 
     plt.figure(figsize=(8, 5))
     sns.countplot(x="total_flags", data=df_results, palette="pastel")
     plt.title(f"{wine_type.capitalize()} Wine: Total Flag Count per Sample")
@@ -79,7 +79,7 @@ def process_wine_type(df, wine_type, pdf):
     pdf.savefig()
     plt.close()
 
-    # --- Plot 3: PCA with LOF ---
+    # PCA with LOF 
     pca = PCA(n_components=2)
     pca_data = pca.fit_transform(X_scaled)
     df_results["PCA1"] = pca_data[:, 0]
@@ -91,7 +91,7 @@ def process_wine_type(df, wine_type, pdf):
     pdf.savefig()
     plt.close()
 
-    # --- Plot 4: t-SNE with LOF ---
+    # t-SNE with LOF 
     tsne = TSNE(n_components=2, perplexity=30, random_state=42)
     tsne_data = tsne.fit_transform(X_scaled)
     df_results["TSNE1"] = tsne_data[:, 0]
@@ -103,7 +103,7 @@ def process_wine_type(df, wine_type, pdf):
     pdf.savefig()
     plt.close()
 
-    # --- Plot 5: Linear Regression Error ---
+    # Linear Regression Error
     plt.figure(figsize=(10, 4))
     plt.hist(lr_error, bins=50, color="orange", edgecolor="black")
     plt.axvline(lr_threshold, color="red", linestyle="--", label="95th Percentile")
@@ -115,7 +115,7 @@ def process_wine_type(df, wine_type, pdf):
     pdf.savefig()
     plt.close()
 
-    # --- Plot 6: Metrics Summary ---
+    # Metrics Summary 
     fig, ax = plt.subplots(figsize=(6, 4))
     metrics_text = f"""Evaluation Metrics (LOF)
 -----------------------------
@@ -130,9 +130,6 @@ ROC-AUC    : {roc_auc:.3f}"""
     plt.close()
 
     return df_results
-
-
-# ========= MAIN SCRIPT =========
 
 # Load the cleaned data
 df = pd.read_csv('/Users/aashiyalama/PycharmProjects/WineTesting/venv/combined_wine_cleaned.csv')
