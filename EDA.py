@@ -2,6 +2,7 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
+from sklearn.model_selection import train_test_split
 import os
 
 # Loading Datasets
@@ -52,7 +53,7 @@ plt.tight_layout()
 plt.savefig(os.path.join(output_dir, 'correlation_heatmap.png'), dpi=300)
 pdf.savefig()
 plt.close()
-print("✅ Saved: correlation_heatmap.png")
+print("Saved: correlation_heatmap.png")
 
 # Box plots for all features
 for feature in features:
@@ -66,7 +67,7 @@ for feature in features:
     plt.savefig(os.path.join(output_dir, filename), dpi=300)
     pdf.savefig()
     plt.close()
-    print(f"✅ Saved: {filename}")
+    print(f"Saved: {filename}")
 
 # Pair plot of Selected Features
 pairplot = sns.pairplot(df[selected + ['type']], hue='type', palette=wine_palette, height=1.8, corner=True)
@@ -74,7 +75,7 @@ pairplot.fig.suptitle("Pairplot of Key Features by Wine Type", y=2)
 pairplot.savefig(os.path.join(output_dir, 'pairplot_selected_features.png'), dpi=300)
 pdf.savefig()
 plt.close()
-print("✅ Saved: pairplot_selected_features.png")
+print("Saved: pairplot_selected_features.png")
 
 # Quality Comparison Bar Plot
 plt.figure(figsize=(10, 6))
@@ -85,12 +86,12 @@ plt.ylabel("Count")
 plt.legend(title="Wine Type")
 plt.tight_layout()
 
-# Save as image
+# Saving as image
 quality_bar_path = os.path.join(output_dir, 'quality_comparison_barplot.png')
 plt.savefig(quality_bar_path, dpi=300)
 pdf.savefig()  # Add to PDF
 plt.close()
-print(f"✅ Saved: {quality_bar_path}")
+print(f"Saved: {quality_bar_path}")
 
 # Average Feature Values by Wine Quality
 avg_features = ['alcohol', 'sulphates', 'residual sugar', 'citric acid', 'pH']
@@ -109,11 +110,33 @@ plt.legend(title="Feature")
 plt.grid(True)
 plt.tight_layout()
 
-# Save to file and PDF
+# Saving to file and PDF
 avg_feat_path = os.path.join(output_dir, 'avg_feature_values_by_quality.png')
 plt.savefig(avg_feat_path, dpi=300)
 pdf.savefig()
 plt.close()
-print(f"✅ Saved: {avg_feat_path}")
+print(f"Saved: {avg_feat_path}")
 
 pdf.close()
+
+print(f"Saved: {avg_feat_path}")
+
+pdf.close()
+
+X_red = red_df[features]
+y_red = red_df['quality']
+X_train_red, X_test_red, y_train_red, y_test_red = train_test_split(X_red, y_red, test_size=0.2, random_state=42)
+
+X_white = white_df[features]
+y_white = white_df['quality']
+X_train_white, X_test_white, y_train_white, y_test_white = train_test_split(X_white, y_white, test_size=0.2, random_state=42)
+
+# Print red wine split summary
+print("Red Wine Dataset Split:")
+print(f"Training Set: {X_train_red.shape[0]} samples")
+print(f"Test Set:     {X_test_red.shape[0]} samples")
+
+# Print white wine split summary
+print("White Wine Dataset Split:")
+print(f"Training Set: {X_train_white.shape[0]} samples")
+print(f"Test Set:     {X_test_white.shape[0]} samples")
