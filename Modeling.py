@@ -2,147 +2,112 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from matplotlib.backends.backend_pdf import PdfPages
-from sklearn.linear_model import LinearRegression
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.neighbors import LocalOutlierFactor
-from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
-from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score
+from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import IsolationForest
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import r2_score
+from matplotlib.backends.backend_pdf import PdfPages
+from sklearn.model_selection import train_test_split
 
-# Function for per-type anomaly detection & evaluation
-def process_wine_type(df, wine_type, pdf):
-    df_type = df[df["type"] == wine_type].copy()
-    df_type["true_anomaly"] = (df_type["quality"] >= np.percentile(df_type["quality"], 95)).astype(int)
+# Loading datasets
+red_df = pd.read_csv('/Users/aashiyalama/PycharmProjects/WineTesting/winequality-red.csv', sep=';')
+white_df = pd.read_csv('/Users/aashiyalama/PycharmProjects/WineTesting/winequality-white.csv', sep=';')
 
-    X = df_type.drop(columns=["wine_name", "type", "quality", "true_anomaly"])
-    y = df_type["quality"]
-    y_true = df_type["true_anomaly"]
-    wine_names = df_type["wine_name"]
+# Defining features
+features = ['alcohol', 'sulphates', 'volatile acidity', 'fixed acidity', 'density',
+            'free sulfur dioxide', 'total sulfur dioxide']
+target = 'quality'
 
+# Splitting wine dataset
+X_red = red_df[features]
+y_red = red_df[target]
+X_train_red, X_test_red, y_train_red, y_test_red = train_test_split(X_red, y_red, test_size=0.2, random_state=42)
+
+X_white = white_df[features]
+y_white = white_df[target]
+X_train_white, X_test_white, y_train_white, y_test_white = train_test_split(X_white, y_white, test_size=0.2, random_state=42)
+
+# Function for model execution and visualisation
+def evaluate_models(X_train, X_test, y_train, y_test, wine_type):
     scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
 
-    df_results = pd.DataFrame()
-    df_results["wine_name"] = wine_names
-    df_results["true_anomaly"] = y_true
+    # Z-Score anomaly detection
+    z_scores = np.abs((X_test_scaled - X_test_scaled.mean(axis=0)) / X_test_scaled.std(axis=0))
+    zscore_anomaly = (z_scores > 3).any(axis=1)
 
-    # Z-Score 
-    z_scores = np.abs((X_scaled - X_scaled.mean(axis=0)) / X_scaled.std(axis=0))
-    df_results["anomaly_zscore"] = (z_scores > 3).any(axis=1).astype(int)
+    # Linear Regression
+    linreg = LinearRegression()
+    linreg.fit(X_train_scaled, y_train)
+    predictions = linreg.predict(X_test_scaled)
+    residuals = np.abs(y_test - predictions)
+    threshold = residuals.mean() + 2 * residuals.std()
+    regression_anomaly = residuals > threshold
+    r2 = r2_score(y_test, predictions)
 
-    # Linear Regression 
-    X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
-    lr_model = LinearRegression()
-    lr_model.fit(X_train, y_train)
-    predicted_quality = lr_model.predict(X_scaled)
-    lr_error = np.abs(y - predicted_quality)
-    lr_threshold = np.percentile(lr_error, 95)
-    df_results["linreg_error"] = lr_error
-    df_results["anomaly_linreg"] = (lr_error > lr_threshold).astype(int)
+    # Isolation Forest
+    iso_forest = IsolationForest(contamination=0.05, random_state=42)
+    iso_forest.fit(X_train_scaled)
+    iso_preds = iso_forest.predict(X_test_scaled)
+    isolation_anomaly = np.where(iso_preds == -1, True, False)
 
-    # LOF 
-    lof = LocalOutlierFactor(n_neighbors=20, contamination=0.05)
-    lof_pred = lof.fit_predict(X_scaled)
-    df_results["anomaly_lof"] = np.where(lof_pred == -1, 1, 0)
+    # Combine results
+    results = X_test.copy()
+    results['quality'] = y_test.values
+    results['zscore_anomaly'] = zscore_anomaly
+    results['regression_anomaly'] = regression_anomaly
+    results['isolation_forest_anomaly'] = isolation_anomaly
+    results['residual'] = residuals
+    results['predicted_quality'] = predictions
 
-    # Total Flags
-    df_results["total_flags"] = df_results[["anomaly_zscore", "anomaly_linreg", "anomaly_lof"]].sum(axis=1)
+    # Creating PDF report
+    pdf = PdfPages(f'{wine_type}_model_results.pdf')
 
-    # Evaluation Metrics
-    precision = precision_score(df_results["true_anomaly"], df_results["anomaly_lof"])
-    recall = recall_score(df_results["true_anomaly"], df_results["anomaly_lof"])
-    f1 = f1_score(df_results["true_anomaly"], df_results["anomaly_lof"])
-    roc_auc = roc_auc_score(df_results["true_anomaly"], df_results["anomaly_lof"])
+    # Boxplots for Z-Score anomalies
+    for feature in features:
+        plt.figure(figsize=(8, 5))
+        sns.boxplot(x=results['zscore_anomaly'], y=results[feature])
+        plt.title(f'{feature} by Z-Score Anomaly - {wine_type.title()}')
+        plt.tight_layout()
+        pdf.savefig()
+        plt.close()
 
-    # % Anomalies
-    methods = ["Z-Score", "Linear Regression", "Local Outlier Factor"]
-    flags = [df_results["anomaly_zscore"], df_results["anomaly_linreg"], df_results["anomaly_lof"]]
-    percentages = [(flag.sum() / len(df_results)) * 100 for flag in flags]
-
-    plt.figure(figsize=(8, 5))
-    sns.barplot(x=methods, y=percentages, palette="Set2")
-    plt.title(f"{wine_type.capitalize()} Wine: Anomalies Detected (%)")
-    plt.ylabel("Percentage")
-    plt.tight_layout()
-    pdf.savefig()
-    plt.close()
-
-    # Flag Count 
-    plt.figure(figsize=(8, 5))
-    sns.countplot(x="total_flags", data=df_results, palette="pastel")
-    plt.title(f"{wine_type.capitalize()} Wine: Total Flag Count per Sample")
-    plt.xlabel("Number of Methods that Flagged")
-    plt.ylabel("Sample Count")
-    plt.tight_layout()
-    pdf.savefig()
-    plt.close()
-
-    # PCA with LOF 
-    pca = PCA(n_components=2)
-    pca_data = pca.fit_transform(X_scaled)
-    df_results["PCA1"] = pca_data[:, 0]
-    df_results["PCA2"] = pca_data[:, 1]
+    # Residual plot for Linear Regression
     plt.figure(figsize=(10, 6))
-    sns.scatterplot(data=df_results, x="PCA1", y="PCA2", hue="anomaly_lof", palette={0: "green", 1: "red"}, alpha=0.6)
-    plt.title(f"{wine_type.capitalize()} Wine: LOF Anomalies (PCA Projection)")
-    plt.tight_layout()
-    pdf.savefig()
-    plt.close()
-
-    # t-SNE with LOF 
-    tsne = TSNE(n_components=2, perplexity=30, random_state=42)
-    tsne_data = tsne.fit_transform(X_scaled)
-    df_results["TSNE1"] = tsne_data[:, 0]
-    df_results["TSNE2"] = tsne_data[:, 1]
-    plt.figure(figsize=(10, 6))
-    sns.scatterplot(data=df_results, x="TSNE1", y="TSNE2", hue="anomaly_lof", palette={0: "blue", 1: "red"}, alpha=0.6)
-    plt.title(f"{wine_type.capitalize()} Wine: LOF Anomalies (t-SNE Projection)")
-    plt.tight_layout()
-    pdf.savefig()
-    plt.close()
-
-    # Linear Regression Error
-    plt.figure(figsize=(10, 4))
-    plt.hist(lr_error, bins=50, color="orange", edgecolor="black")
-    plt.axvline(lr_threshold, color="red", linestyle="--", label="95th Percentile")
-    plt.title(f"{wine_type.capitalize()} Wine: Linear Regression Error")
-    plt.xlabel("Absolute Error")
-    plt.ylabel("Wine Count")
+    sns.histplot(results['residual'], bins=50, kde=True)
+    plt.axvline(threshold, color='red', linestyle='--', label='Anomaly Threshold')
+    plt.title(f'Regression Residuals - {wine_type.title()}')
+    plt.xlabel('Residual (|Actual - Predicted|)')
     plt.legend()
     plt.tight_layout()
     pdf.savefig()
     plt.close()
 
-    # Metrics Summary 
-    fig, ax = plt.subplots(figsize=(6, 4))
-    metrics_text = f"""Evaluation Metrics (LOF)
------------------------------
-Precision  : {precision:.3f}
-Recall     : {recall:.3f}
-F1 Score   : {f1:.3f}
-ROC-AUC    : {roc_auc:.3f}"""
-    ax.text(0.01, 0.8, metrics_text, fontsize=12, va='top', family='monospace')
-    ax.axis('off')
+    # t-SNE Projection for Isolation Forest Anomalies
+    X_test_2d = TSNE(n_components=2, random_state=42).fit_transform(X_test_scaled)
+    results['tsne_x'] = X_test_2d[:, 0]
+    results['tsne_y'] = X_test_2d[:, 1]
+
+    plt.figure(figsize=(8, 6))
+    sns.scatterplot(x='tsne_x', y='tsne_y', hue='isolation_forest_anomaly', data=results,
+                    palette={0: 'gray', 1: 'red'})
+    plt.title(f't-SNE Projection - Isolation Forest Anomalies ({wine_type.title()})')
+    plt.xlabel('t-SNE X')
+    plt.ylabel('t-SNE Y')
+    plt.legend(title='Anomaly')
     plt.tight_layout()
     pdf.savefig()
     plt.close()
 
-    return df_results
+    pdf.close()
+    print(f"PDF report saved as: {wine_type}_model_results.pdf") # Saving the result in a pdf
 
-# Load the cleaned data
-df = pd.read_csv('/Users/aashiyalama/PycharmProjects/WineTesting/venv/combined_wine_cleaned.csv')
+# Run on both red and white wine datasets
+evaluate_models(X_train_red, X_test_red, y_train_red, y_test_red, 'red')
+evaluate_models(X_train_white, X_test_white, y_train_white, y_test_white, 'white')
 
-# Add wine_name column if missing
-df['wine_name'] = df.get('wine_name', [f"wine_{i}" for i in range(len(df))])
 
-# Output PDF path
-pdf = PdfPages('/Users/aashiyalama/PycharmProjects/WineTesting/EDA results/wine_anomaly_results.pdf')
 
-# Run for both red and white
-results_red = process_wine_type(df, "red", pdf)
-results_white = process_wine_type(df, "white", pdf)
 
-pdf.close()
-print("✅ All visualizations and evaluation metrics saved in: wine_anomaly_results.pdf")
