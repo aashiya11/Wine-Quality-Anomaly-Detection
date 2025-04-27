@@ -1,0 +1,152 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import IsolationForest
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import r2_score
+from sklearn.manifold import TSNE
+from sklearn.decomposition import PCA
+from sklearn.model_selection import train_test_split
+from matplotlib.backends.backend_pdf import PdfPages
+import os
+
+# Load datasets
+red_df = pd.read_csv('/Users/aashiyalama/PycharmProjects/WineTesting/winequality-red.csv', sep=';')
+white_df = pd.read_csv('/Users/aashiyalama/PycharmProjects/WineTesting/winequality-white.csv', sep=';')
+
+# Define model pipeline with evaluation metrics
+def run_models(wine_df, wine_type):
+    features = ['alcohol', 'sulphates', 'volatile acidity', 'fixed acidity', 'density',
+                'free sulfur dioxide', 'total sulfur dioxide']
+    target = 'quality'
+
+    # Split data
+    X = wine_df[features]
+    y = wine_df[target]
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+
+    # Z-Score (on test set)
+    z_scores = np.abs((X_test_scaled - X_test_scaled.mean(axis=0)) / X_test_scaled.std(axis=0))
+    zscore_anomaly = (z_scores > 3).any(axis=1)
+
+    # Linear Regression (train on train set, predict on test set)
+    linreg = LinearRegression()
+    linreg.fit(X_train_scaled, y_train)
+    predictions = linreg.predict(X_test_scaled)
+    residuals = np.abs(y_test - predictions)
+    threshold = residuals.mean() + 2 * residuals.std()
+    regression_anomaly = residuals > threshold
+    r2 = r2_score(y_test, predictions)
+
+    # Isolation Forest (train on train set, predict on test set)
+    iso_forest = IsolationForest(contamination=0.05, random_state=42)
+    iso_forest.fit(X_train_scaled)
+    isolation_preds = iso_forest.predict(X_test_scaled)
+    isolation_anomaly = pd.Series(isolation_preds).map({1: 0, -1: 1})
+
+    # Combine results for evaluation
+    results = X_test.copy()
+    results[target] = y_test.values
+    results['zscore_anomaly'] = zscore_anomaly
+    results['regression_anomaly'] = regression_anomaly
+    results['isolation_forest_anomaly'] = isolation_anomaly
+    results['residual'] = residuals
+    results['predicted_quality'] = predictions
+
+    total_samples = len(results)
+    anomalies_percent = results[['zscore_anomaly', 'regression_anomaly', 'isolation_forest_anomaly']].sum() / total_samples * 100
+    results['anomaly_sum'] = results[['zscore_anomaly', 'regression_anomaly', 'isolation_forest_anomaly']].sum(axis=1)
+    agreement_2plus = (results['anomaly_sum'] >= 2).sum()
+    all_three = (results['anomaly_sum'] == 3).sum()
+
+    print(f"Evaluation for {wine_type.title()} Wine")
+    print("Proportion of Anomalies Detected (%):\n", anomalies_percent.round(2))
+    print(f"R² Score (Linear Regression): {r2:.3f}")
+    print(f"Wines flagged by 2+ models: {agreement_2plus}")
+    print(f"Wines flagged by all 3 models: {all_three}")
+
+    # Visualisation
+    output_dir = f'/Users/aashiyalama/PycharmProjects/WineTesting/visualisations/{wine_type}'
+    os.makedirs(output_dir, exist_ok=True)
+    pdf_path = os.path.join(output_dir, f'{wine_type}_evaluation_metrics.pdf')
+    pdf = PdfPages(pdf_path)
+
+    # Bar Chart: Proportion of Anomalies Detected
+    plt.figure(figsize=(8, 5))
+    anomalies_percent.plot(kind='bar', color=['skyblue', 'lightgreen', 'salmon'])
+    plt.title(f'Proportion of Anomalies Detected - {wine_type.title()} Wine')
+    plt.ylabel('Percentage of Wines Flagged (%)')
+    plt.xlabel('Model')
+    plt.xticks(rotation=0)
+    plt.tight_layout()
+    pdf.savefig()
+    plt.close()
+
+    # Stacked Bar: Cross-Model Agreement
+    plt.figure(figsize=(8, 5))
+    sns.histplot(results['anomaly_sum'], bins=[0,1,2,3,4], discrete=True, color='mediumpurple')
+    plt.title(f'Cross-Model Agreement - {wine_type.title()} Wine')
+    plt.xlabel('Number of Models that Flagged a Wine')
+    plt.ylabel('Wine Count')
+    plt.xticks([0, 1, 2, 3])
+    plt.tight_layout()
+    pdf.savefig()
+    plt.close()
+
+    # Boxplots: Feature Differentiation
+    for feature in features:
+        plt.figure(figsize=(8, 5))
+        sns.boxplot(x='isolation_forest_anomaly', y=feature, data=results)
+        plt.title(f"{feature} by Isolation Forest Anomaly - {wine_type.title()} Wine")
+        plt.xlabel("Anomaly")
+        plt.tight_layout()
+        pdf.savefig()
+        plt.close()
+
+    # t-SNE Visualization
+    X_tsne = TSNE(n_components=2, random_state=42).fit_transform(X_test_scaled)
+    results['tsne_x'] = X_tsne[:, 0]
+    results['tsne_y'] = X_tsne[:, 1]
+    plt.figure(figsize=(8, 6))
+    sns.scatterplot(x='tsne_x', y='tsne_y', hue='isolation_forest_anomaly', data=results, palette={0: 'grey', 1: 'red'})
+    plt.title(f"t-SNE Projection - Isolation Forest Anomalies ({wine_type.title()} Wine)")
+    plt.tight_layout()
+    pdf.savefig()
+    plt.close()
+
+    # PCA Visualization
+    X_pca = PCA(n_components=2).fit_transform(X_test_scaled)
+    results['pca_x'] = X_pca[:, 0]
+    results['pca_y'] = X_pca[:, 1]
+    plt.figure(figsize=(8, 6))
+    sns.scatterplot(x='pca_x', y='pca_y', hue='isolation_forest_anomaly', data=results, palette={0: 'grey', 1: 'red'})
+    plt.title(f"PCA Projection - Isolation Forest Anomalies ({wine_type.title()} Wine)")
+    plt.tight_layout()
+    pdf.savefig()
+    plt.close()
+
+    # Predicted vs Actual Quality (Regression)
+    plt.figure(figsize=(8, 6))
+    sns.scatterplot(x=results[target], y=results['predicted_quality'], alpha=0.6)
+    plt.plot([results[target].min(), results[target].max()],
+             [results[target].min(), results[target].max()], 'r--')
+    plt.title(f"Predicted vs Actual Wine Quality - {wine_type.title()}")
+    plt.xlabel("Actual Quality")
+    plt.ylabel("Predicted Quality")
+    plt.text(x=results[target].min()+0.5, y=results[target].max()-0.5, s=f'R² = {r2:.3f}', fontsize=12, bbox=dict(facecolor='white', alpha=0.6))
+    plt.tight_layout()
+    pdf.savefig()
+    plt.close()
+
+    pdf.close()
+    print(f"Evaluation visualisations saved to {pdf_path}")
+
+# Run for both datasets
+run_models(red_df, 'red')
+run_models(white_df, 'white')
